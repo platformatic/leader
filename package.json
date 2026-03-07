@@ -1,0 +1,22 @@
+{
+  "name": "@platformatic/leader",
+  "version": "0.1.0",
+  "description": "PostgreSQL advisory lock-based leader election with notification channels",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "lint": "standard ."
+  },
+  "dependencies": {
+    "@databases/pg": "^5.5.0"
+  },
+  "devDependencies": {
+    "pg": "^8.13.3",
+    "standard": "^17.1.2"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "license": "Apache-2.0",
+  "author": "Marco Piraccini <marco@platformatic.dev>"
+}
