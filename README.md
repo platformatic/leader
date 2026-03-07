@@ -15,16 +15,15 @@ npm install @platformatic/leader
 ```js
 'use strict'
 
-const createConnectionPool = require('@databases/pg')
+const pg = require('pg')
 const createLeaderElector = require('@platformatic/leader')
 
-const db = createConnectionPool({
-  connectionString: 'postgres://localhost/mydb',
-  bigIntMode: 'bigint'
+const pool = new pg.Pool({
+  connectionString: 'postgres://localhost/mydb'
 })
 
 const leader = createLeaderElector({
-  db,
+  pool,
   lock: 4242,
   poll: 10000,
   channels: [
@@ -35,7 +34,6 @@ const leader = createLeaderElector({
       }
     }
   ],
-  log: console,
   onLeadershipChange: (isLeader) => {
     console.log('Leadership changed:', isLeader)
   }
@@ -51,7 +49,7 @@ console.log(leader.isLeader())
 
 // Stop the leader elector
 await leader.stop()
-await db.dispose()
+await pool.end()
 ```
 
 ## API
@@ -64,11 +62,11 @@ Returns an object with `{ start, stop, notify, isLeader }`.
 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `db` | `ConnectionPool` | Yes | - | A `@databases/pg` connection pool |
+| `pool` | `pg.Pool` | Yes | - | A [node-postgres](https://node-postgres.com/) pool instance |
 | `lock` | `number` | Yes | - | PostgreSQL advisory lock ID |
 | `poll` | `number` | No | `10000` | Polling interval in milliseconds |
 | `channels` | `Array` | Yes | - | Notification channel configurations |
-| `log` | `object` | Yes | - | Logger with `info`, `debug`, `warn`, `error` methods |
+| `log` | `object` | No | `pino()` | Logger with `info`, `debug`, `warn`, `error` methods |
 | `onLeadershipChange` | `function` | No | `null` | Callback invoked with `(isLeader: boolean)` when leadership status changes |
 
 Each channel in the `channels` array must have:
@@ -89,6 +87,20 @@ Each channel in the `channels` array must have:
 3. Only the leader processes incoming notifications and routes them to the appropriate channel handler.
 4. If the leader stops or loses the lock, another instance acquires it and takes over.
 5. The `onLeadershipChange` callback fires whenever the leadership status transitions.
+
+## Development
+
+Start PostgreSQL:
+
+```
+docker compose up -d
+```
+
+Run tests:
+
+```
+node --test test/*.test.js
+```
 
 ## License
 

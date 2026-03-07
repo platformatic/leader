@@ -2,30 +2,27 @@
 
 const { scheduler } = require('timers/promises')
 const { on } = require('events')
+const pino = require('pino')
 
 function createLeaderElector (options) {
   const {
-    db,
+    pool,
     lock,
     poll = 10000,
     channels,
-    log,
+    log = pino(),
     onLeadershipChange = null
   } = options
 
-  log.info('Acquiring advisory lock %d', lock)
-
-  if (!db) {
-    throw new Error('db is required')
+  if (!pool) {
+    throw new Error('pool is required')
   }
 
   if (!lock) {
     throw new Error('lock is required')
   }
 
-  if (!log) {
-    throw new Error('log is required')
-  }
+  log.info('Acquiring advisory lock %d', lock)
 
   if (!channels || !Array.isArray(channels) || channels.length === 0) {
     throw new Error('channels array is required')
@@ -56,22 +53,23 @@ function createLeaderElector (options) {
   }
 
   async function amITheLeader () {
-    const sql = db.sql
-    await db.task(async (t) => {
+    const client = await pool.connect()
+    try {
       while (!abortController.signal.aborted) {
-        const [{ leader }] = await t.query(sql`
-          SELECT pg_try_advisory_lock(${lock}) as leader;
-        `)
+        const { rows: [{ leader }] } = await client.query(
+          'SELECT pg_try_advisory_lock($1) as leader',
+          [lock]
+        )
         if (leader && !elected) {
           log.info('This instance is the leader')
           updateLeadershipStatus(true)
           ;(async () => {
             for (const ch of notificationChannels) {
-              await t.query(sql.__dangerous__rawValue(`LISTEN "${ch.channel}";`))
+              await client.query(`LISTEN "${ch.channel}"`)
               log.info({ channel: ch.channel }, 'Listening to notification channel')
             }
 
-            for await (const notification of on(t._driver.client, 'notification', { signal: abortController.signal })) {
+            for await (const notification of on(client, 'notification', { signal: abortController.signal })) {
               log.debug({ notification }, 'Received notification')
               try {
                 const msg = notification[0]
@@ -110,7 +108,9 @@ function createLeaderElector (options) {
           break
         }
       }
-    })
+    } finally {
+      client.release()
+    }
     log.debug('leader loop stopped')
   }
 
@@ -140,8 +140,7 @@ function createLeaderElector (options) {
 
     payload = JSON.stringify(payload)
 
-    const sql = db.sql
-    await db.query(sql.__dangerous__rawValue(`NOTIFY "${channelName}", '${payload}';`))
+    await pool.query(`NOTIFY "${channelName}", '${payload}'`)
   }
 
   async function stop () {

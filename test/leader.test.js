@@ -4,10 +4,9 @@ const { test } = require('node:test')
 const assert = require('node:assert')
 const { setTimeout: sleep } = require('node:timers/promises')
 const pg = require('pg')
-const createConnectionPool = require('@databases/pg')
 const createLeaderElector = require('../index')
 
-const connectionString = process.env.CONNECTION_STRING || 'postgres://postgres:postgres@127.0.0.1:5433/scaler'
+const connectionString = process.env.CONNECTION_STRING || 'postgres://postgres:postgres@127.0.0.1:5433/leader'
 
 const silentLogger = {
   info: () => {},
@@ -16,18 +15,19 @@ const silentLogger = {
   error: () => {}
 }
 
+function createPool () {
+  return new pg.Pool({ connectionString })
+}
+
 test('should notify through PostgreSQL notification', async (t) => {
   const listenClient = new pg.Client(connectionString)
   await listenClient.connect()
 
-  const pool = createConnectionPool({
-    connectionString,
-    bigIntMode: 'bigint'
-  })
+  const pool = createPool()
 
   t.after(async () => {
     await listenClient.end()
-    await pool.dispose()
+    await pool.end()
   })
 
   let notificationReceived = false
@@ -43,7 +43,7 @@ test('should notify through PostgreSQL notification', async (t) => {
   await listenClient.query('LISTEN "test_channel"')
 
   const leaderElection = createLeaderElector({
-    db: pool,
+    pool,
     lock: 9999,
     channels: [
       {
@@ -67,14 +67,11 @@ test('leaderElector notifies through PostgreSQL notification with an object', as
   const listenClient = new pg.Client(connectionString)
   await listenClient.connect()
 
-  const pool = createConnectionPool({
-    connectionString,
-    bigIntMode: 'bigint'
-  })
+  const pool = createPool()
 
   t.after(async () => {
     await listenClient.end()
-    await pool.dispose()
+    await pool.end()
   })
 
   let notificationReceived = false
@@ -90,7 +87,7 @@ test('leaderElector notifies through PostgreSQL notification with an object', as
   await listenClient.query('LISTEN "test_channel"')
 
   const leaderElection = createLeaderElector({
-    db: pool,
+    pool,
     lock: 9999,
     channels: [
       {
@@ -114,18 +111,15 @@ test('leaderElector properly passes payload to callback', async (t) => {
   let callbackCount = 0
   let callbackPayload = null
 
-  const pool = createConnectionPool({
-    connectionString,
-    bigIntMode: 'bigint'
-  })
+  const pool = createPool()
 
   t.after(async () => {
     await leaderElector.stop()
-    await pool.dispose()
+    await pool.end()
   })
 
   const leaderElector = createLeaderElector({
-    db: pool,
+    pool,
     lock: 9999,
     poll: 200,
     channels: [
@@ -154,24 +148,16 @@ test('leaderElector properly passes payload to callback', async (t) => {
 })
 
 test('if one instance is shut down, the other is elected', async (t) => {
-  const pool1 = createConnectionPool({
-    connectionString,
-    bigIntMode: 'bigint'
-  })
-
-  const pool2 = createConnectionPool({
-    connectionString,
-    bigIntMode: 'bigint'
-  })
+  const pool1 = createPool()
+  const pool2 = createPool()
 
   const lockId = Math.floor(Math.random() * 1000) + 7000
 
-  const sql = pool1.sql
-  await pool1.query(sql`SELECT pg_advisory_unlock_all();`)
-  await pool2.query(sql`SELECT pg_advisory_unlock_all();`)
+  await pool1.query('SELECT pg_advisory_unlock_all()')
+  await pool2.query('SELECT pg_advisory_unlock_all()')
 
   const leaderElector1 = createLeaderElector({
-    db: pool1,
+    pool: pool1,
     lock: lockId,
     poll: 200,
     channels: [
@@ -188,7 +174,7 @@ test('if one instance is shut down, the other is elected', async (t) => {
   assert.ok(leaderElector1.isLeader())
 
   const leaderElector2 = createLeaderElector({
-    db: pool2,
+    pool: pool2,
     lock: lockId,
     poll: 200,
     channels: [
@@ -208,46 +194,38 @@ test('if one instance is shut down, the other is elected', async (t) => {
 
   await leaderElector1.stop()
   await sleep(500)
-  await pool1.dispose()
+  await pool1.end()
 
   await sleep(500)
 
   assert.ok(leaderElector2.isLeader())
 
   await leaderElector2.stop()
-  await pool2.dispose()
+  await pool2.end()
 })
 
 test('only the leader instance executes notification callbacks and leadership transfers properly', async (t) => {
-  const pool1 = createConnectionPool({
-    connectionString,
-    bigIntMode: 'bigint'
-  })
-
-  const pool2 = createConnectionPool({
-    connectionString,
-    bigIntMode: 'bigint'
-  })
+  const pool1 = createPool()
+  const pool2 = createPool()
 
   const lockId = Math.floor(Math.random() * 1000) + 7000
   const testChannel = `test_leader_notifications_${lockId}`
 
   t.after(async () => {
     try {
-      await pool1.dispose().catch(() => {})
-      await pool2.dispose().catch(() => {})
+      await pool1.end().catch(() => {})
+      await pool2.end().catch(() => {})
     } catch {}
   })
 
-  const sql = pool1.sql
-  await pool1.query(sql`SELECT pg_advisory_unlock_all();`)
-  await pool2.query(sql`SELECT pg_advisory_unlock_all();`)
+  await pool1.query('SELECT pg_advisory_unlock_all()')
+  await pool2.query('SELECT pg_advisory_unlock_all()')
 
   let instance1Notifications = 0
   let instance2Notifications = 0
 
   const leaderElector1 = createLeaderElector({
-    db: pool1,
+    pool: pool1,
     lock: lockId,
     poll: 100,
     channels: [
@@ -262,7 +240,7 @@ test('only the leader instance executes notification callbacks and leadership tr
   })
 
   const leaderElector2 = createLeaderElector({
-    db: pool2,
+    pool: pool2,
     lock: lockId,
     poll: 100,
     channels: [
@@ -294,7 +272,7 @@ test('only the leader instance executes notification callbacks and leadership tr
 
   await leaderElector1.stop()
   await sleep(500)
-  await pool1.dispose()
+  await pool1.end()
 
   await sleep(500)
   assert.ok(leaderElector2.isLeader())
@@ -312,32 +290,25 @@ test('only the leader instance executes notification callbacks and leadership tr
 
 test('should throw error when required parameters are missing', async () => {
   assert.throws(() => {
-    createLeaderElector({ log: { info: () => {} }, lock: 123 })
-  }, { message: 'db is required' })
+    createLeaderElector({ lock: 123 })
+  }, { message: 'pool is required' })
 
   assert.throws(() => {
-    createLeaderElector({ db: {}, log: { info: () => {} } })
+    createLeaderElector({ pool: {} })
   }, { message: 'lock is required' })
 
   assert.throws(() => {
-    createLeaderElector({ db: {}, lock: 123, log: { info: () => {} } })
+    createLeaderElector({ pool: {}, lock: 123 })
   }, { message: 'channels array is required' })
-
-  assert.throws(() => {
-    createLeaderElector({})
-  })
 })
 
 test('should trigger onLeadershipChange callback when leadership changes', async (t) => {
-  const pool = createConnectionPool({
-    connectionString,
-    bigIntMode: 'bigint'
-  })
+  const pool = createPool()
 
   const leadershipChanges = []
 
   const leaderElector = createLeaderElector({
-    db: pool,
+    pool,
     lock: 8888,
     poll: 200,
     channels: [
@@ -360,18 +331,15 @@ test('should trigger onLeadershipChange callback when leadership changes', async
   assert.strictEqual(leadershipChanges[0], true)
 
   await leaderElector.stop()
-  await pool.dispose()
+  await pool.end()
 })
 
 test('should handle errors in onNotification callback', async (t) => {
-  const pool = createConnectionPool({
-    connectionString,
-    bigIntMode: 'bigint'
-  })
+  const pool = createPool()
 
   const logMessages = []
   const leaderElector = createLeaderElector({
-    db: pool,
+    pool,
     lock: 7777,
     poll: 200,
     channels: [
@@ -397,7 +365,7 @@ test('should handle errors in onNotification callback', async (t) => {
   await sleep(500)
 
   await leaderElector.stop()
-  await pool.dispose()
+  await pool.end()
 
   const warnLog = logMessages.find(log => log.level === 'warn' && log.data.err)
   assert.ok(warnLog)
@@ -405,16 +373,13 @@ test('should handle errors in onNotification callback', async (t) => {
 })
 
 test('should support multiple notification channels', async (t) => {
-  const pool = createConnectionPool({
-    connectionString,
-    bigIntMode: 'bigint'
-  })
+  const pool = createPool()
 
   const channel1Notifications = []
   const channel2Notifications = []
 
   const leaderElector = createLeaderElector({
-    db: pool,
+    pool,
     lock: 9999,
     poll: 200,
     channels: [
@@ -447,7 +412,7 @@ test('should support multiple notification channels', async (t) => {
   await sleep(300)
 
   await leaderElector.stop()
-  await pool.dispose()
+  await pool.end()
 
   assert.strictEqual(channel1Notifications.length, 2)
   assert.strictEqual(channel1Notifications[0].message, 'hello from channel 1')
@@ -458,15 +423,12 @@ test('should support multiple notification channels', async (t) => {
 })
 
 test('should route notifications to correct channel handler', async (t) => {
-  const pool = createConnectionPool({
-    connectionString,
-    bigIntMode: 'bigint'
-  })
+  const pool = createPool()
 
   const receivedNotifications = []
 
   const leaderElector = createLeaderElector({
-    db: pool,
+    pool,
     lock: 10000,
     poll: 200,
     channels: [
@@ -497,7 +459,7 @@ test('should route notifications to correct channel handler', async (t) => {
   await sleep(300)
 
   await leaderElector.stop()
-  await pool.dispose()
+  await pool.end()
 
   assert.strictEqual(receivedNotifications.length, 3)
   assert.strictEqual(receivedNotifications[0].channel, 'a')
@@ -511,7 +473,7 @@ test('should route notifications to correct channel handler', async (t) => {
 test('should throw error when channels array has invalid entries', async () => {
   assert.throws(() => {
     createLeaderElector({
-      db: {},
+      pool: {},
       lock: 123,
       log: { info: () => {} },
       channels: [
@@ -523,7 +485,7 @@ test('should throw error when channels array has invalid entries', async () => {
 
   assert.throws(() => {
     createLeaderElector({
-      db: {},
+      pool: {},
       lock: 123,
       log: { info: () => {} },
       channels: [
