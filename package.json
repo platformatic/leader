@@ -1,6 +1,6 @@
 {
   "name": "@platformatic/leader",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "PostgreSQL advisory lock-based leader election with notification channels",
   "main": "index.js",
   "scripts": {
