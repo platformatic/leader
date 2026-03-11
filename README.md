@@ -99,7 +99,7 @@ Returns an object with `{ start, stop, notify, isLeader }`.
 | `pool` | `pg.Pool` | Yes | - | A [node-postgres](https://node-postgres.com/) pool instance |
 | `lock` | `number` | Yes | - | PostgreSQL advisory lock ID |
 | `poll` | `number` | No | `10000` | Polling interval in milliseconds |
-| `channels` | `Array` | Yes | - | Notification channel configurations |
+| `channels` | `Array` | No | - | Notification channel configurations (omit for election-only mode) |
 | `log` | `object` | No | `pino()` | Logger with `info`, `debug`, `warn`, `error` methods |
 | `onLeadershipChange` | `function` | No | `null` | Callback invoked with `(isLeader: boolean)` when leadership status changes |
 
