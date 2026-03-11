@@ -12,6 +12,40 @@ npm install @platformatic/leader
 
 ## Usage
 
+### Election only
+
+```js
+'use strict'
+
+const pg = require('pg')
+const createLeaderElector = require('@platformatic/leader')
+
+const pool = new pg.Pool({
+  connectionString: 'postgres://localhost/mydb'
+})
+
+const leader = createLeaderElector({
+  pool,
+  lock: 4242,
+  onLeadershipChange: (isLeader) => {
+    if (isLeader) {
+      console.log('I am the leader — starting work')
+    } else {
+      console.log('No longer the leader — stopping work')
+    }
+  }
+})
+
+leader.start()
+
+console.log(leader.isLeader()) // true or false
+
+await leader.stop()
+await pool.end()
+```
+
+### With notification channels
+
 ```js
 'use strict'
 

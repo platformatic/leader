@@ -24,20 +24,21 @@ function createLeaderElector (options) {
 
   log.info('Acquiring advisory lock %d', lock)
 
-  if (!channels || !Array.isArray(channels) || channels.length === 0) {
-    throw new Error('channels array is required')
+  if (channels) {
+    if (!Array.isArray(channels)) {
+      throw new Error('channels must be an array')
+    }
+    for (const ch of channels) {
+      if (!ch.channel) {
+        throw new Error('channel is required for each notification channel')
+      }
+      if (!ch.onNotification) {
+        throw new Error('onNotification is required for each notification channel')
+      }
+    }
   }
 
-  for (const ch of channels) {
-    if (!ch.channel) {
-      throw new Error('channel is required for each notification channel')
-    }
-    if (!ch.onNotification) {
-      throw new Error('onNotification is required for each notification channel')
-    }
-  }
-
-  const notificationChannels = channels
+  const notificationChannels = channels || []
 
   let elected = false
   const abortController = new AbortController()
@@ -63,37 +64,39 @@ function createLeaderElector (options) {
         if (leader && !elected) {
           log.info('This instance is the leader')
           updateLeadershipStatus(true)
-          ;(async () => {
-            for (const ch of notificationChannels) {
-              await client.query(`LISTEN "${ch.channel}"`)
-              log.info({ channel: ch.channel }, 'Listening to notification channel')
-            }
+          if (notificationChannels.length > 0) {
+            ;(async () => {
+              for (const ch of notificationChannels) {
+                await client.query(`LISTEN "${ch.channel}"`)
+                log.info({ channel: ch.channel }, 'Listening to notification channel')
+              }
 
-            for await (const notification of on(client, 'notification', { signal: abortController.signal })) {
-              log.debug({ notification }, 'Received notification')
-              try {
-                const msg = notification[0]
-                const payload = JSON.parse(msg.payload)
-                const channelName = msg.channel
+              for await (const notification of on(client, 'notification', { signal: abortController.signal })) {
+                log.debug({ notification }, 'Received notification')
+                try {
+                  const msg = notification[0]
+                  const payload = JSON.parse(msg.payload)
+                  const channelName = msg.channel
 
-                const channelConfig = notificationChannels.find(ch => ch.channel === channelName)
-                if (channelConfig) {
-                  await channelConfig.onNotification(payload)
-                } else {
-                  log.warn({ channel: channelName }, 'No handler found for notification channel')
+                  const channelConfig = notificationChannels.find(ch => ch.channel === channelName)
+                  if (channelConfig) {
+                    await channelConfig.onNotification(payload)
+                  } else {
+                    log.warn({ channel: channelName }, 'No handler found for notification channel')
+                  }
+                } catch (err) {
+                  log.warn({ err }, 'error while processing notification')
                 }
-              } catch (err) {
-                log.warn({ err }, 'error while processing notification')
               }
-            }
-          })()
-            .catch((err) => {
-              if (err.name !== 'AbortError') {
-                log.error({ err }, 'Error in notification')
-              } else {
-                abortController.abort()
-              }
-            })
+            })()
+              .catch((err) => {
+                if (err.name !== 'AbortError') {
+                  log.error({ err }, 'Error in notification')
+                } else {
+                  abortController.abort()
+                }
+              })
+          }
         } else if (leader && elected) {
           log.debug('This instance is still the leader')
         } else if (!leader && elected) {
