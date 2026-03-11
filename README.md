@@ -12,6 +12,40 @@ npm install @platformatic/leader
 
 ## Usage
 
+### Election only
+
+```js
+'use strict'
+
+const pg = require('pg')
+const createLeaderElector = require('@platformatic/leader')
+
+const pool = new pg.Pool({
+  connectionString: 'postgres://localhost/mydb'
+})
+
+const leader = createLeaderElector({
+  pool,
+  lock: 4242,
+  onLeadershipChange: (isLeader) => {
+    if (isLeader) {
+      console.log('I am the leader — starting work')
+    } else {
+      console.log('No longer the leader — stopping work')
+    }
+  }
+})
+
+leader.start()
+
+console.log(leader.isLeader()) // true or false
+
+await leader.stop()
+await pool.end()
+```
+
+### With notification channels
+
 ```js
 'use strict'
 
@@ -65,7 +99,7 @@ Returns an object with `{ start, stop, notify, isLeader }`.
 | `pool` | `pg.Pool` | Yes | - | A [node-postgres](https://node-postgres.com/) pool instance |
 | `lock` | `number` | Yes | - | PostgreSQL advisory lock ID |
 | `poll` | `number` | No | `10000` | Polling interval in milliseconds |
-| `channels` | `Array` | Yes | - | Notification channel configurations |
+| `channels` | `Array` | No | - | Notification channel configurations (omit for election-only mode) |
 | `log` | `object` | No | `pino()` | Logger with `info`, `debug`, `warn`, `error` methods |
 | `onLeadershipChange` | `function` | No | `null` | Callback invoked with `(isLeader: boolean)` when leadership status changes |
 

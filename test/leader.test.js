@@ -297,9 +297,10 @@ test('should throw error when required parameters are missing', async () => {
     createLeaderElector({ pool: {} })
   }, { message: 'lock is required' })
 
-  assert.throws(() => {
+  // channels is optional — no throw without it
+  assert.doesNotThrow(() => {
     createLeaderElector({ pool: {}, lock: 123 })
-  }, { message: 'channels array is required' })
+  })
 })
 
 test('should trigger onLeadershipChange callback when leadership changes', async (t) => {
@@ -493,4 +494,78 @@ test('should throw error when channels array has invalid entries', async () => {
       ]
     })
   }, { message: 'channel is required for each notification channel' })
+
+  assert.throws(() => {
+    createLeaderElector({
+      pool: {},
+      lock: 123,
+      channels: 'not-an-array'
+    })
+  }, { message: 'channels must be an array' })
+})
+
+test('election-only mode: works without channels', async (t) => {
+  const pool = createPool()
+  const leadershipChanges = []
+
+  t.after(async () => {
+    await leader.stop()
+    await pool.end()
+  })
+
+  const leader = createLeaderElector({
+    pool,
+    lock: 70001,
+    poll: 200,
+    log: silentLogger,
+    onLeadershipChange: (isLeader) => {
+      leadershipChanges.push(isLeader)
+    }
+  })
+
+  leader.start()
+  await sleep(500)
+
+  assert.ok(leader.isLeader())
+  assert.deepStrictEqual(leadershipChanges, [true])
+})
+
+test('election-only mode: two instances, only one becomes leader', async (t) => {
+  const pool1 = createPool()
+  const pool2 = createPool()
+  const changes1 = []
+  const changes2 = []
+
+  t.after(async () => {
+    await leader1.stop()
+    await leader2.stop()
+    await pool1.end()
+    await pool2.end()
+  })
+
+  const leader1 = createLeaderElector({
+    pool: pool1,
+    lock: 70002,
+    poll: 200,
+    log: silentLogger,
+    onLeadershipChange: (isLeader) => { changes1.push(isLeader) }
+  })
+
+  const leader2 = createLeaderElector({
+    pool: pool2,
+    lock: 70002,
+    poll: 200,
+    log: silentLogger,
+    onLeadershipChange: (isLeader) => { changes2.push(isLeader) }
+  })
+
+  leader1.start()
+  await sleep(500)
+  leader2.start()
+  await sleep(500)
+
+  assert.ok(leader1.isLeader())
+  assert.ok(!leader2.isLeader())
+  assert.deepStrictEqual(changes1, [true])
+  assert.deepStrictEqual(changes2, [])
 })
