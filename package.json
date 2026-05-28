@@ -3,8 +3,10 @@
   "version": "0.2.0",
   "description": "PostgreSQL advisory lock-based leader election with notification channels",
   "main": "index.js",
+  "types": "index.d.ts",
   "scripts": {
     "test": "node --test test/*.test.js",
+    "test:types": "tsc -p tsconfig.json",
     "lint": "standard ."
   },
   "dependencies": {
@@ -12,7 +14,8 @@
     "pino": "^10.3.1"
   },
   "devDependencies": {
-    "standard": "^17.1.2"
+    "standard": "^17.1.2",
+    "typescript": "^5.9.3"
   },
   "engines": {
     "node": ">=22.0.0"
